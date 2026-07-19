@@ -8,7 +8,7 @@ import javax.swing.JPanel;
 
 public class NextPiecePanel extends JPanel {
 
-    private static final int CELL = 24;
+    private static final int CELL = 36;
     private Shape piece = new Shape();
 
     public NextPiecePanel() {

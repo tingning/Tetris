@@ -232,6 +232,7 @@ public class Board extends JPanel implements ActionListener {
         }
 
         if (numFullLines > 0) {
+            SoundUtil.playLineClearSound();
             numLinesRemoved += numFullLines;
             score += switch (numFullLines) {
                 case 1 -> 100;

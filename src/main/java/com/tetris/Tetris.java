@@ -61,7 +61,7 @@ public class Tetris extends JFrame {
             }
         });
 
-        setSize(400, 600);
+        setSize(600, 900);
         setLocationRelativeTo(null);
         board.requestFocusInWindow();
     }
