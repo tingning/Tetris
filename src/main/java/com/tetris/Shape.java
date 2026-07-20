@@ -12,6 +12,9 @@ public class Shape {
 
     private Tetromino pieceShape;
     private final int[][] coords;
+
+    // Block offsets per Tetromino ordinal (NoShape, ZShape, SShape, LineShape,
+    // TShape, SquareShape, LShape, JShape), in the same order as the enum.
     private static final int[][][] COORDS_TABLE = {
         {{0, 0}, {0, 0}, {0, 0}, {0, 0}},
         {{0, -1}, {0, 0}, {-1, 0}, {-1, 1}},
@@ -88,11 +91,13 @@ public class Shape {
     }
 
     public Shape rotateLeft() {
+        // Squares look identical after rotation, so skip the transform.
         if (pieceShape == Tetromino.SquareShape) {
             return this;
         }
         Shape result = new Shape();
         result.pieceShape = pieceShape;
+        // 90-degree rotation of (x, y) -> (y, -x) about the pivot.
         for (int i = 0; i < 4; i++) {
             result.setX(i, y(i));
             result.setY(i, -x(i));
@@ -106,6 +111,7 @@ public class Shape {
         }
         Shape result = new Shape();
         result.pieceShape = pieceShape;
+        // 90-degree rotation of (x, y) -> (-y, x) about the pivot.
         for (int i = 0; i < 4; i++) {
             result.setX(i, -y(i));
             result.setY(i, x(i));
