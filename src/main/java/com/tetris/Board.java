@@ -15,12 +15,18 @@ import java.util.Random;
 import javax.swing.JPanel;
 import javax.swing.Timer;
 
+/**
+ * Game board panel: owns the falling-piece state, the settled grid, scoring,
+ * and rendering. Logical rows grow upward (row 0 is the floor), but they are
+ * painted top-down, so drawing code flips the row index.
+ */
 public class Board extends JPanel implements ActionListener {
 
     private static final int BOARD_WIDTH = 10;
     private static final int BOARD_HEIGHT = 22;
     private static final int INITIAL_DELAY = 400;
     private static final int FLASH_DELAY = 80;
+    // Number of flashTimer ticks a cleared line blinks for before it's actually removed.
     private static final int FLASH_TOTAL_TICKS = 6;
 
     private Timer timer;
@@ -32,11 +38,13 @@ public class Board extends JPanel implements ActionListener {
     private int numLinesRemoved = 0;
     private int score = 0;
     private int level = 1;
+    // Rows currently blinking because they were completed and are awaiting removal.
     private List<Integer> flashingLines = new ArrayList<>();
     private int flashTicks = 0;
 
     private Shape curPiece;
     private Shape nextPiece;
+    // Flattened BOARD_WIDTH x BOARD_HEIGHT grid of settled squares, indexed via shapeAt().
     private Shape.Tetromino[] board;
     private final Random random = new Random();
     private final Tetris parent;
@@ -107,6 +115,7 @@ public class Board extends JPanel implements ActionListener {
 
         boolean flashOn = flashTicks % 2 == 1;
         for (int i = 0; i < BOARD_HEIGHT; i++) {
+            // Logical row 0 is the floor; flip so it paints at the bottom of the panel.
             int row = BOARD_HEIGHT - i - 1;
             boolean flashRow = flashOn && flashingLines.contains(row);
             for (int j = 0; j < BOARD_WIDTH; j++) {
@@ -140,6 +149,7 @@ public class Board extends JPanel implements ActionListener {
     private void onFlashTick() {
         flashTicks++;
         repaint();
+        // Once the blink cycle finishes, actually shift rows down and resume play.
         if (flashTicks >= FLASH_TOTAL_TICKS) {
             flashTimer.stop();
             completeLineClear();
@@ -153,6 +163,7 @@ public class Board extends JPanel implements ActionListener {
     }
 
     private void pickNextPiece() {
+        // Skip index 0 (NoShape) so only real tetrominoes are ever chosen.
         Shape.Tetromino[] values = Shape.Tetromino.values();
         int r = random.nextInt(values.length - 1) + 1;
         nextPiece.setShape(values[r]);
@@ -173,6 +184,10 @@ public class Board extends JPanel implements ActionListener {
         parent.repaintNext(nextPiece);
     }
 
+    /**
+     * Checks whether newPiece fits at (newX, newY) without going out of bounds
+     * or overlapping settled squares, and commits the move if so.
+     */
     private boolean tryMove(Shape newPiece, int newX, int newY) {
         for (int i = 0; i < 4; i++) {
             int x = newX + newPiece.x(i);
@@ -237,6 +252,10 @@ public class Board extends JPanel implements ActionListener {
         return full;
     }
 
+    /**
+     * If any rows are full, freezes gameplay and starts the flash animation instead
+     * of clearing them immediately; the actual removal happens in completeLineClear().
+     */
     private boolean startLineClearIfNeeded() {
         List<Integer> full = detectFullLines();
         if (full.isEmpty()) {
@@ -253,6 +272,8 @@ public class Board extends JPanel implements ActionListener {
         return true;
     }
 
+    // Removes full rows (recomputed here rather than reusing flashingLines, since the
+    // count still needs a fresh scan) and settles rows above down to fill the gap.
     private void completeLineClear() {
         int numFullLines = flashingLines.size();
         flashingLines = new ArrayList<>();
@@ -266,6 +287,7 @@ public class Board extends JPanel implements ActionListener {
                 }
             }
             if (lineIsFull) {
+                // Shift every row above i down by one, then clear the vacated top row.
                 for (int k = i; k < BOARD_HEIGHT - 1; k++) {
                     for (int j = 0; j < BOARD_WIDTH; j++) {
                         board[k * BOARD_WIDTH + j] = shapeAt(j, k + 1);
@@ -274,11 +296,13 @@ public class Board extends JPanel implements ActionListener {
                 for (int j = 0; j < BOARD_WIDTH; j++) {
                     board[(BOARD_HEIGHT - 1) * BOARD_WIDTH + j] = Shape.Tetromino.NoShape;
                 }
+                // Row i now holds what used to be row i+1; re-examine it before continuing downward.
                 i++;
             }
         }
 
         numLinesRemoved += numFullLines;
+        // Standard Tetris-style scoring: reward multi-line clears disproportionately, scaled by level.
         score += switch (numFullLines) {
             case 1 -> 100;
             case 2 -> 300;
@@ -287,6 +311,7 @@ public class Board extends JPanel implements ActionListener {
             default -> 0;
         } * level;
 
+        // Level up every 10 lines; each level speeds the drop timer up, floored at 100ms.
         int newLevel = 1 + numLinesRemoved / 10;
         if (newLevel != level) {
             level = newLevel;
@@ -339,6 +364,7 @@ public class Board extends JPanel implements ActionListener {
 
             int keycode = e.getKeyCode();
 
+            // Pause must be handled before the isPaused guard below, or it could never unpause.
             if (keycode == 'P' || keycode == 'p') {
                 pause();
                 return;
