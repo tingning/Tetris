@@ -8,6 +8,8 @@ import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
 
 import javax.swing.JPanel;
@@ -18,9 +20,11 @@ public class Board extends JPanel implements ActionListener {
     private static final int BOARD_WIDTH = 10;
     private static final int BOARD_HEIGHT = 22;
     private static final int INITIAL_DELAY = 400;
+    private static final int FLASH_DELAY = 80;
+    private static final int FLASH_TOTAL_TICKS = 6;
 
     private Timer timer;
-    private boolean isFallingFinished = false;
+    private Timer flashTimer;
     private boolean isPaused = false;
     private boolean isStarted = false;
     private int curX = 0;
@@ -28,6 +32,8 @@ public class Board extends JPanel implements ActionListener {
     private int numLinesRemoved = 0;
     private int score = 0;
     private int level = 1;
+    private List<Integer> flashingLines = new ArrayList<>();
+    private int flashTicks = 0;
 
     private Shape curPiece;
     private Shape nextPiece;
@@ -41,6 +47,7 @@ public class Board extends JPanel implements ActionListener {
         curPiece = new Shape();
         nextPiece = new Shape();
         timer = new Timer(INITIAL_DELAY, this);
+        flashTimer = new Timer(FLASH_DELAY, e -> onFlashTick());
         board = new Shape.Tetromino[BOARD_WIDTH * BOARD_HEIGHT];
         addKeyListener(new TAdapter());
         clearBoard();
@@ -64,7 +71,8 @@ public class Board extends JPanel implements ActionListener {
             return;
         }
         isStarted = true;
-        isFallingFinished = false;
+        flashTimer.stop();
+        flashingLines = new ArrayList<>();
         numLinesRemoved = 0;
         score = 0;
         level = 1;
@@ -97,11 +105,14 @@ public class Board extends JPanel implements ActionListener {
         Dimension size = getSize();
         int boardTop = size.height - BOARD_HEIGHT * squareHeight();
 
+        boolean flashOn = flashTicks % 2 == 1;
         for (int i = 0; i < BOARD_HEIGHT; i++) {
+            int row = BOARD_HEIGHT - i - 1;
+            boolean flashRow = flashOn && flashingLines.contains(row);
             for (int j = 0; j < BOARD_WIDTH; j++) {
-                Shape.Tetromino shape = shapeAt(j, BOARD_HEIGHT - i - 1);
+                Shape.Tetromino shape = shapeAt(j, row);
                 if (shape != Shape.Tetromino.NoShape) {
-                    drawSquare(g, j * squareWidth(), boardTop + i * squareHeight(), shape);
+                    drawSquare(g, j * squareWidth(), boardTop + i * squareHeight(), shape, flashRow);
                 }
             }
         }
@@ -123,11 +134,15 @@ public class Board extends JPanel implements ActionListener {
 
     @Override
     public void actionPerformed(ActionEvent e) {
-        if (isFallingFinished) {
-            isFallingFinished = false;
-            newPiece();
-        } else {
-            oneLineDown();
+        oneLineDown();
+    }
+
+    private void onFlashTick() {
+        flashTicks++;
+        repaint();
+        if (flashTicks >= FLASH_TOTAL_TICKS) {
+            flashTimer.stop();
+            completeLineClear();
         }
     }
 
@@ -200,14 +215,47 @@ public class Board extends JPanel implements ActionListener {
             int y = curY - curPiece.y(i);
             board[y * BOARD_WIDTH + x] = curPiece.getShape();
         }
-        removeFullLines();
-        if (!isFallingFinished) {
+        if (!startLineClearIfNeeded()) {
             newPiece();
         }
     }
 
-    private void removeFullLines() {
-        int numFullLines = 0;
+    private List<Integer> detectFullLines() {
+        List<Integer> full = new ArrayList<>();
+        for (int i = 0; i < BOARD_HEIGHT; i++) {
+            boolean lineIsFull = true;
+            for (int j = 0; j < BOARD_WIDTH; j++) {
+                if (shapeAt(j, i) == Shape.Tetromino.NoShape) {
+                    lineIsFull = false;
+                    break;
+                }
+            }
+            if (lineIsFull) {
+                full.add(i);
+            }
+        }
+        return full;
+    }
+
+    private boolean startLineClearIfNeeded() {
+        List<Integer> full = detectFullLines();
+        if (full.isEmpty()) {
+            return false;
+        }
+
+        SoundUtil.playLineClearSound();
+        flashingLines = full;
+        flashTicks = 0;
+        curPiece.setShape(Shape.Tetromino.NoShape);
+        timer.stop();
+        repaint();
+        flashTimer.start();
+        return true;
+    }
+
+    private void completeLineClear() {
+        int numFullLines = flashingLines.size();
+        flashingLines = new ArrayList<>();
 
         for (int i = BOARD_HEIGHT - 1; i >= 0; i--) {
             boolean lineIsFull = true;
@@ -218,7 +266,6 @@ public class Board extends JPanel implements ActionListener {
                 }
             }
             if (lineIsFull) {
-                numFullLines++;
                 for (int k = i; k < BOARD_HEIGHT - 1; k++) {
                     for (int j = 0; j < BOARD_WIDTH; j++) {
                         board[k * BOARD_WIDTH + j] = shapeAt(j, k + 1);
@@ -231,28 +278,25 @@ public class Board extends JPanel implements ActionListener {
             }
         }
 
-        if (numFullLines > 0) {
-            SoundUtil.playLineClearSound();
-            numLinesRemoved += numFullLines;
-            score += switch (numFullLines) {
-                case 1 -> 100;
-                case 2 -> 300;
-                case 3 -> 500;
-                case 4 -> 800;
-                default -> 0;
-            } * level;
+        numLinesRemoved += numFullLines;
+        score += switch (numFullLines) {
+            case 1 -> 100;
+            case 2 -> 300;
+            case 3 -> 500;
+            case 4 -> 800;
+            default -> 0;
+        } * level;
 
-            int newLevel = 1 + numLinesRemoved / 10;
-            if (newLevel != level) {
-                level = newLevel;
-                timer.setDelay(Math.max(100, INITIAL_DELAY - (level - 1) * 30));
-            }
-
-            isFallingFinished = true;
-            curPiece.setShape(Shape.Tetromino.NoShape);
-            updateStatus();
-            repaint();
+        int newLevel = 1 + numLinesRemoved / 10;
+        if (newLevel != level) {
+            level = newLevel;
+            timer.setDelay(Math.max(100, INITIAL_DELAY - (level - 1) * 30));
         }
+
+        updateStatus();
+        repaint();
+        timer.start();
+        newPiece();
     }
 
     private void updateStatus() {
@@ -260,13 +304,17 @@ public class Board extends JPanel implements ActionListener {
     }
 
     private void drawSquare(Graphics g, int x, int y, Shape.Tetromino shape) {
+        drawSquare(g, x, y, shape, false);
+    }
+
+    private void drawSquare(Graphics g, int x, int y, Shape.Tetromino shape, boolean flash) {
         Color[] colors = {
             new Color(0, 0, 0), new Color(204, 102, 102), new Color(102, 204, 102),
             new Color(102, 102, 204), new Color(204, 204, 102), new Color(204, 102, 204),
             new Color(102, 204, 204), new Color(218, 170, 0)
         };
 
-        Color color = colors[shape.ordinal()];
+        Color color = flash ? Color.WHITE : colors[shape.ordinal()];
         int w = squareWidth();
         int h = squareHeight();
 
