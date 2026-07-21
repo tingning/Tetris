@@ -43,6 +43,8 @@ public class Board extends JPanel implements ActionListener {
     private int flashTicks = 0;
 
     private Shape curPiece;
+    // A fresh Shape instance each time it's picked, so promoting it to curPiece
+    // never aliases an object that a later pick could still mutate.
     private Shape nextPiece;
     // Flattened BOARD_WIDTH x BOARD_HEIGHT grid of settled squares, indexed via shapeAt().
     private Shape.Tetromino[] board;
@@ -53,13 +55,12 @@ public class Board extends JPanel implements ActionListener {
         this.parent = parent;
         setFocusable(true);
         curPiece = new Shape();
-        nextPiece = new Shape();
         timer = new Timer(INITIAL_DELAY, this);
         flashTimer = new Timer(FLASH_DELAY, e -> onFlashTick());
         board = new Shape.Tetromino[BOARD_WIDTH * BOARD_HEIGHT];
         addKeyListener(new TAdapter());
         clearBoard();
-        pickNextPiece();
+        nextPiece = randomShape();
     }
 
     private int squareWidth() {
@@ -86,7 +87,7 @@ public class Board extends JPanel implements ActionListener {
         level = 1;
         timer.setDelay(INITIAL_DELAY);
         clearBoard();
-        pickNextPiece();
+        nextPiece = randomShape();
         newPiece();
         timer.start();
         updateStatus();
@@ -162,16 +163,18 @@ public class Board extends JPanel implements ActionListener {
         }
     }
 
-    private void pickNextPiece() {
+    private Shape randomShape() {
         // Skip index 0 (NoShape) so only real tetrominoes are ever chosen.
         Shape.Tetromino[] values = Shape.Tetromino.values();
         int r = random.nextInt(values.length - 1) + 1;
-        nextPiece.setShape(values[r]);
+        Shape shape = new Shape();
+        shape.setShape(values[r]);
+        return shape;
     }
 
     private void newPiece() {
         curPiece = nextPiece;
-        pickNextPiece();
+        nextPiece = randomShape();
         curX = BOARD_WIDTH / 2 + 1;
         curY = BOARD_HEIGHT - 1 + curPiece.minY();
 
