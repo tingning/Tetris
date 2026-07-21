@@ -13,7 +13,7 @@ public class NextPiecePanel extends JPanel {
 
     public NextPiecePanel() {
         setPreferredSize(new Dimension(CELL * 6, CELL * 6));
-        setBackground(Color.BLACK);
+        setBackground(new Color(144, 238, 144));
     }
 
     public void setPiece(Shape piece) {
