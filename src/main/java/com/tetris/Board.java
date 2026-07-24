@@ -25,8 +25,8 @@ public class Board extends JPanel implements ActionListener {
     private static final int BOARD_WIDTH = 10;
     private static final int BOARD_HEIGHT = 22;
     private static final int INITIAL_DELAY = 400;
-    private static final int FLASH_DELAY = 80;
-    // Number of flashTimer ticks a cleared line blinks for before it's actually removed.
+    private static final int FLASH_DELAY = 100;
+    // Number of visibility toggles the completed rows blink through before being removed.
     private static final int FLASH_TOTAL_TICKS = 6;
 
     private Timer timer;
@@ -38,8 +38,10 @@ public class Board extends JPanel implements ActionListener {
     private int numLinesRemoved = 0;
     private int score = 0;
     private int level = 1;
-    // Rows currently blinking because they were completed and are awaiting removal.
-    private List<Integer> flashingLines = new ArrayList<>();
+
+    // Rows currently blinking after a line clear, and whether this tick renders them lit.
+    private List<Integer> flashingRows = new ArrayList<>();
+    private boolean flashVisible = true;
     private int flashTicks = 0;
 
     private Shape curPiece;
@@ -56,7 +58,6 @@ public class Board extends JPanel implements ActionListener {
         setFocusable(true);
         curPiece = new Shape();
         timer = new Timer(INITIAL_DELAY, this);
-        flashTimer = new Timer(FLASH_DELAY, e -> onFlashTick());
         board = new Shape.Tetromino[BOARD_WIDTH * BOARD_HEIGHT];
         addKeyListener(new TAdapter());
         clearBoard();
@@ -80,8 +81,6 @@ public class Board extends JPanel implements ActionListener {
             return;
         }
         isStarted = true;
-        flashTimer.stop();
-        flashingLines = new ArrayList<>();
         numLinesRemoved = 0;
         score = 0;
         level = 1;
@@ -114,15 +113,21 @@ public class Board extends JPanel implements ActionListener {
         Dimension size = getSize();
         int boardTop = size.height - BOARD_HEIGHT * squareHeight();
 
-        boolean flashOn = flashTicks % 2 == 1;
         for (int i = 0; i < BOARD_HEIGHT; i++) {
             // Logical row 0 is the floor; flip so it paints at the bottom of the panel.
             int row = BOARD_HEIGHT - i - 1;
-            boolean flashRow = flashOn && flashingLines.contains(row);
+            boolean isFlashingRow = flashingRows.contains(row);
             for (int j = 0; j < BOARD_WIDTH; j++) {
                 Shape.Tetromino shape = shapeAt(j, row);
                 if (shape != Shape.Tetromino.NoShape) {
-                    drawSquare(g, j * squareWidth(), boardTop + i * squareHeight(), shape, flashRow);
+                    if (isFlashingRow) {
+                        // Blink: lit tick draws white, unlit tick draws nothing, giving a flash effect.
+                        if (flashVisible) {
+                            drawFlashSquare(g, j * squareWidth(), boardTop + i * squareHeight());
+                        }
+                    } else {
+                        drawSquare(g, j * squareWidth(), boardTop + i * squareHeight(), shape);
+                    }
                 }
             }
         }
@@ -145,16 +150,6 @@ public class Board extends JPanel implements ActionListener {
     @Override
     public void actionPerformed(ActionEvent e) {
         oneLineDown();
-    }
-
-    private void onFlashTick() {
-        flashTicks++;
-        repaint();
-        // Once the blink cycle finishes, actually shift rows down and resume play.
-        if (flashTicks >= FLASH_TOTAL_TICKS) {
-            flashTimer.stop();
-            completeLineClear();
-        }
     }
 
     private void clearBoard() {
@@ -233,8 +228,44 @@ public class Board extends JPanel implements ActionListener {
             int y = curY - curPiece.y(i);
             board[y * BOARD_WIDTH + x] = curPiece.getShape();
         }
-        if (!startLineClearIfNeeded()) {
+        // Hide the now-settled piece immediately; this also blocks input via the
+        // TAdapter's NoShape guard while the completed-line flash plays out.
+        curPiece.setShape(Shape.Tetromino.NoShape);
+
+        List<Integer> full = detectFullLines();
+        if (full.isEmpty()) {
             newPiece();
+        } else {
+            startLineFlash(full);
+        }
+    }
+
+    // Blinks the completed rows a few times before they're actually removed.
+    private void startLineFlash(List<Integer> full) {
+        SoundUtil.playLineClearSound();
+        timer.stop();
+        flashingRows = full;
+        flashVisible = true;
+        flashTicks = 0;
+        repaint();
+
+        flashTimer = new Timer(FLASH_DELAY, e -> onFlashTick(full));
+        flashTimer.start();
+    }
+
+    private void onFlashTick(List<Integer> full) {
+        flashVisible = !flashVisible;
+        flashTicks++;
+        repaint();
+
+        if (flashTicks >= FLASH_TOTAL_TICKS) {
+            flashTimer.stop();
+            flashingRows = new ArrayList<>();
+            removeLines(full);
+            newPiece();
+            if (isStarted && !isPaused) {
+                timer.start();
+            }
         }
     }
 
@@ -255,31 +286,9 @@ public class Board extends JPanel implements ActionListener {
         return full;
     }
 
-    /**
-     * If any rows are full, freezes gameplay and starts the flash animation instead
-     * of clearing them immediately; the actual removal happens in completeLineClear().
-     */
-    private boolean startLineClearIfNeeded() {
-        List<Integer> full = detectFullLines();
-        if (full.isEmpty()) {
-            return false;
-        }
-
-        SoundUtil.playLineClearSound();
-        flashingLines = full;
-        flashTicks = 0;
-        curPiece.setShape(Shape.Tetromino.NoShape);
-        timer.stop();
-        repaint();
-        flashTimer.start();
-        return true;
-    }
-
-    // Removes full rows (recomputed here rather than reusing flashingLines, since the
-    // count still needs a fresh scan) and settles rows above down to fill the gap.
-    private void completeLineClear() {
-        int numFullLines = flashingLines.size();
-        flashingLines = new ArrayList<>();
+    // Removes the given (already-detected) full rows and settles rows above down to fill the gap.
+    private void removeLines(List<Integer> full) {
+        int numFullLines = full.size();
 
         for (int i = BOARD_HEIGHT - 1; i >= 0; i--) {
             boolean lineIsFull = true;
@@ -322,27 +331,27 @@ public class Board extends JPanel implements ActionListener {
         }
 
         updateStatus();
-        repaint();
-        timer.start();
-        newPiece();
     }
 
     private void updateStatus() {
         parent.setStatusText("Score: " + score + "   Lines: " + numLinesRemoved + "   Level: " + level);
     }
 
-    private void drawSquare(Graphics g, int x, int y, Shape.Tetromino shape) {
-        drawSquare(g, x, y, shape, false);
+    private void drawFlashSquare(Graphics g, int x, int y) {
+        int w = squareWidth();
+        int h = squareHeight();
+        g.setColor(Color.WHITE);
+        g.fillRect(x + 1, y + 1, w - 2, h - 2);
     }
 
-    private void drawSquare(Graphics g, int x, int y, Shape.Tetromino shape, boolean flash) {
+    private void drawSquare(Graphics g, int x, int y, Shape.Tetromino shape) {
         Color[] colors = {
             new Color(0, 0, 0), new Color(204, 102, 102), new Color(102, 204, 102),
             new Color(102, 102, 204), new Color(204, 204, 102), new Color(204, 102, 204),
             new Color(102, 204, 204), new Color(218, 170, 0)
         };
 
-        Color color = flash ? Color.WHITE : colors[shape.ordinal()];
+        Color color = colors[shape.ordinal()];
         int w = squareWidth();
         int h = squareHeight();
 
